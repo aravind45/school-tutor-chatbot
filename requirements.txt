@@ -1,3 +1,5 @@
+gradio==4.44.0
+spaces==0.28.3
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
