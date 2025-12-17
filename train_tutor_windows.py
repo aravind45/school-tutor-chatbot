@@ -1,36 +1,50 @@
 """
-train_tutor.py
+train_tutor_windows.py
 
-End-to-end LoRA fine-tuning script for a School Tutor chatbot using:
+LoRA fine-tuning for a School Tutor chatbot using:
 - Unsloth (4-bit loading)
-- TRL SFTTrainer
-- JSONL dataset at: data/train.jsonl and data/eval.jsonl
+- TRL SFTTrainer (v0.26.1 compatible)
+- JSONL dataset:
+    data/train.jsonl
+    data/eval.jsonl
 
-Windows-compatible version with torch compile disabled.
+Expected JSONL keys per line:
+{"instruction": "...", "input": "", "output": "..."}
+
+Notes:
+- TRL 0.26.1 SFTTrainer does NOT accept `max_seq_length` as a constructor arg.
+  We set tokenizer.model_max_length instead and rely on truncation.
 """
-
 import os
-import json
-import torch
 
-# CRITICAL: Disable torch compile on Windows before importing unsloth
-os.environ["DISABLE_UNSLOTH_COMPILE"] = "1"
+# Disable TorchDynamo / Inductor (Windows fix)
+os.environ["TORCHDYNAMO_DISABLE"] = "1"
+os.environ["TORCH_COMPILE"] = "0"
+
+import inspect
+import torch
 torch._dynamo.config.suppress_errors = True
+
+
+# Import unsloth BEFORE trl/transformers/peft for best patching
+import unsloth
+from unsloth import FastLanguageModel
 
 from datasets import load_dataset
 from transformers import TrainingArguments
 from trl import SFTTrainer
-from unsloth import FastLanguageModel
+
+
 
 # -----------------------------
 # Config
 # -----------------------------
-MODEL_NAME = "unsloth/llama-3-8b-bnb-4bit"  # change if you want a different base
+MODEL_NAME = "unsloth/llama-3-8b-bnb-4bit"  # change as needed
 OUTPUT_DIR = "tutor_model_lora"
 MAX_SEQ_LENGTH = 2048
 
 TRAIN_PATH = "data/train.jsonl"
-EVAL_PATH = "data/eval.jsonl"
+EVAL_PATH  = "data/eval.jsonl"
 
 
 # -----------------------------
@@ -49,7 +63,7 @@ def load_jsonl_dataset(train_path=TRAIN_PATH, eval_path=EVAL_PATH):
 
 def formatting_prompts_func(examples):
     """
-    Builds the exact training text the model learns.
+    Builds the training text field ("text") that SFTTrainer consumes.
     """
     instructions = examples["instruction"]
     inputs = examples.get("input", [""] * len(instructions))
@@ -88,8 +102,7 @@ def formatting_prompts_func(examples):
 def train_tutor_model():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Load base model + tokenizer (4-bit)
-    print("🚀 Loading model...")
+    print("🚀 Loading base model with Unsloth (4-bit)...")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=MODEL_NAME,
         max_seq_length=MAX_SEQ_LENGTH,
@@ -97,13 +110,17 @@ def train_tutor_model():
         load_in_4bit=True,
     )
 
-    # Apply LoRA
-    print("🔧 Applying LoRA adapters...")
+    # Important for TRL: enforce a max length via tokenizer
+    tokenizer.model_max_length = MAX_SEQ_LENGTH
+
+    print("🧩 Applying LoRA adapters...")
     model = FastLanguageModel.get_peft_model(
         model,
         r=16,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                        "gate_proj", "up_proj", "down_proj"],
+        target_modules=[
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj"
+        ],
         lora_alpha=16,
         lora_dropout=0.0,
         bias="none",
@@ -113,51 +130,46 @@ def train_tutor_model():
         loftq_config=None,
     )
 
-    # Load dataset
-    print("📚 Loading datasets...")
+    print("📦 Loading JSONL datasets...")
     train_dataset, eval_dataset = load_jsonl_dataset()
 
-    # Basic schema validation (fail fast)
-    required_cols = {"instruction", "output"}
-    missing_train = required_cols - set(train_dataset.column_names)
-    missing_eval = required_cols - set(eval_dataset.column_names)
+    # Fail-fast schema checks
+    required = {"instruction", "output"}
+    missing_train = required - set(train_dataset.column_names)
+    missing_eval  = required - set(eval_dataset.column_names)
     if missing_train:
         raise ValueError(f"Train dataset missing columns: {missing_train}")
     if missing_eval:
         raise ValueError(f"Eval dataset missing columns: {missing_eval}")
 
-    # Create formatted "text" field
-    print("🔄 Formatting prompts...")
+    print("🧾 Formatting prompts into `text` field...")
     train_dataset = train_dataset.map(formatting_prompts_func, batched=True)
-    eval_dataset = eval_dataset.map(formatting_prompts_func, batched=True)
+    eval_dataset  = eval_dataset.map(formatting_prompts_func, batched=True)
 
-    # Sanity print (prevents 90% of wasted runs)
-    print("\n--- Sample formatted training text (first 500 chars) ---")
-    print(train_dataset[0]["text"][:500])
+    # Sanity print
+    print("\n--- Sample formatted training text (first 400 chars) ---")
+    print(train_dataset[0]["text"][:400])
     print("------------------------------------------------------\n")
 
-    # Training arguments (EVAL SETTINGS MUST BE INSIDE THIS BLOCK)
     print("⚙️ Setting up training arguments...")
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
         warmup_steps=100,
-        max_steps=1000,  # adjust as needed
-        learning_rate=2e-4,  # if outputs look unstable, try 1e-4
+        max_steps=1000,              # adjust as needed
+        learning_rate=2e-4,          # if unstable, try 1e-4
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=torch.cuda.is_bf16_supported(),
         logging_steps=25,
 
-        # Checkpointing
         save_steps=100,
         save_total_limit=2,
 
-        # Evaluation
+        # Transformers 4.57+: uses eval_strategy (not evaluation_strategy)
         eval_strategy="steps",
         eval_steps=100,
 
-        # Misc
         optim="adamw_8bit",
         weight_decay=0.01,
         lr_scheduler_type="linear",
@@ -166,25 +178,62 @@ def train_tutor_model():
     )
 
     print("🎯 Creating trainer...")
-    trainer = SFTTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        args=training_args,
-        max_seq_length=MAX_SEQ_LENGTH,
-        dataset_text_field="text",
-        packing=False,
-    )
 
-    print("🚂 Starting training...")
+    print("🎯 Creating trainer.")
+
+    import inspect
+    sig = inspect.signature(SFTTrainer.__init__)
+
+    trainer_kwargs = {
+        "model": model,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset,
+        "args": training_args,
+    }
+
+    # Tokenizer arg name changed across TRL versions
+    if "tokenizer" in sig.parameters:
+        trainer_kwargs["tokenizer"] = tokenizer
+    elif "processing_class" in sig.parameters:
+        trainer_kwargs["processing_class"] = tokenizer
+
+    # TRL 0.26.x: dataset_text_field is often removed; use formatting_func instead.
+    # Since you already created a "text" column, we can return it directly.
+    if "dataset_text_field" in sig.parameters:
+        trainer_kwargs["dataset_text_field"] = "text"
+    elif "formatting_func" in sig.parameters:
+        trainer_kwargs["formatting_func"] = lambda ex: ex["text"]
+    else:
+        # last resort: keep train_dataset already mapped to "text" and hope defaults exist
+        pass
+
+    # Only pass packing if supported
+    if "packing" in sig.parameters:
+        trainer_kwargs["packing"] = False
+
+    trainer = SFTTrainer(**trainer_kwargs)
+
+    if "tokenizer" in sig.parameters:
+        trainer_kwargs["tokenizer"] = tokenizer
+    elif "processing_class" in sig.parameters:
+        # In some TRL builds, `processing_class` replaces tokenizer
+        trainer_kwargs["processing_class"] = tokenizer
+    else:
+        # last-resort fallback
+        trainer_kwargs["tokenizer"] = tokenizer
+
+    # IMPORTANT: Do NOT pass max_seq_length to SFTTrainer in TRL 0.26.1
+    # trainer_kwargs["max_seq_length"] = MAX_SEQ_LENGTH  # <-- intentionally omitted
+
+    trainer = SFTTrainer(**trainer_kwargs)
+
+    print("🏁 Starting training...")
     trainer.train()
 
-    # Save LoRA adapter + tokenizer
-    print("💾 Saving model...")
+    print("💾 Saving model + tokenizer...")
     model.save_pretrained(OUTPUT_DIR)
     tokenizer.save_pretrained(OUTPUT_DIR)
-    print(f"✅ Saved model + tokenizer to: {OUTPUT_DIR}")
+    print(f"✅ Saved to: {OUTPUT_DIR}")
 
     return OUTPUT_DIR
 
@@ -215,20 +264,14 @@ def build_prompt(user_instruction: str, user_input: str = "") -> str:
 def test_tutor_model(model_dir=OUTPUT_DIR, deterministic=True):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    print(f"\n🧪 Loading model for testing from {model_dir}...")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_dir,
         max_seq_length=MAX_SEQ_LENGTH,
         dtype=None,
         load_in_4bit=True,
     )
+    tokenizer.model_max_length = MAX_SEQ_LENGTH
     FastLanguageModel.for_inference(model)
-
-    # Keep model on GPU if available; otherwise CPU
-    if device == "cpu":
-        # Note: 4-bit CPU inference may be slow or unsupported depending on setup.
-        # If you hit issues, run inference on a CUDA machine.
-        pass
 
     prompts = [
         "Explain Newton's 2nd law with a simple example.",
@@ -240,14 +283,11 @@ def test_tutor_model(model_dir=OUTPUT_DIR, deterministic=True):
         prompt = build_prompt(p)
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True).to(device)
 
-        gen_kwargs = dict(
-            max_new_tokens=250,
-        )
-
+        gen_kwargs = {"max_new_tokens": 250}
         if deterministic:
-            gen_kwargs.update(dict(do_sample=False))
+            gen_kwargs.update({"do_sample": False})
         else:
-            gen_kwargs.update(dict(do_sample=True, temperature=0.7))
+            gen_kwargs.update({"do_sample": True, "temperature": 0.7})
 
         outputs = model.generate(**inputs, **gen_kwargs)
         text = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -259,21 +299,7 @@ def test_tutor_model(model_dir=OUTPUT_DIR, deterministic=True):
 
 
 def main():
-    print("=" * 80)
-    print("🎓 HIGH SCHOOL TUTOR FINE-TUNING (Windows Compatible)")
-    print("=" * 80)
-
-    # Check GPU
-    if torch.cuda.is_available():
-        print(f"✅ GPU detected: {torch.cuda.get_device_name(0)}")
-        print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-    else:
-        print("⚠️ No GPU detected! Training will be very slow.")
-
-    print()
-
     out_dir = train_tutor_model()
-    # Deterministic test by default
     test_tutor_model(out_dir, deterministic=True)
 
 

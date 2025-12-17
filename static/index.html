@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High School Tutor - AI Learning Assistant</title>
+    <style>
+        /* ============================================================================
+           CSS STYLING
+           ============================================================================ */
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .chat-container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 900px;
+            height: 90vh;
+            max-height: 800px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* Header */
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+            text-align: center;
+            border-bottom: 3px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .chat-header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .chat-header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        /* Messages Area */
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            background: #f8f9fa;
+            scroll-behavior: smooth;
+        }
+        
+        .welcome-message {
+            background: white;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .welcome-message h2 {
+            color: #667eea;
+            font-size: 20px;
+            margin-bottom: 12px;
+        }
+        
+        .welcome-message p {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        
+        .welcome-message ul {
+            margin-left: 20px;
+            color: #666;
+            line-height: 1.8;
+        }
+        
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .message.user {
+            justify-content: flex-end;
+        }
+        
+        .message.assistant {
+            justify-content: flex-start;
+        }
+        
+        .message-bubble {
+            max-width: 70%;
+            padding: 14px 18px;
+            border-radius: 18px;
+            line-height: 1.5;
+            word-wrap: break-word;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .message.assistant .message-bubble {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .loading-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 18px;
+            background: white;
+            border-radius: 18px;
+            border: 1px solid #e0e0e0;
+            max-width: 70%;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .loading-indicator.active {
+            display: flex;
+        }
+        
+        .loading-dots {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .loading-dots span {
+            width: 8px;
+            height: 8px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+        
+        .loading-dots span:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+        
+        .loading-dots span:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+        
+        @keyframes bounce {
+            0%, 80%, 100% {
+                transform: scale(0);
+            }
+            40% {
+                transform: scale(1);
+            }
+        }
+        
+        /* Input Area */
+        .input-container {
+            padding: 20px 24px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+        
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+        
+        #messageInput {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 24px;
+            font-size: 15px;
+            font-family: inherit;
+            resize: none;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            max-height: 120px;
+            line-height: 1.5;
+        }
+        
+        #messageInput:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        #messageInput:disabled {
+            background: #f5f5f5;
+            cursor: not-allowed;
+        }
+        
+        #sendButton {
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 24px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            white-space: nowrap;
+        }
+        
+        #sendButton:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        #sendButton:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        
+        #sendButton:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .error-message {
+            background: #fee;
+            border-left: 4px solid #f44;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            color: #c33;
+            display: none;
+        }
+        
+        .error-message.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        /* Scrollbar Styling */
+        .messages-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .messages-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .messages-container::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+        
+        .messages-container::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+            .chat-container {
+                max-width: 100%;
+                height: 100vh;
+                max-height: 100vh;
+                border-radius: 0;
+            }
+            
+            body {
+                padding: 0;
+            }
+            
+            .message-bubble {
+                max-width: 85%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Header -->
+        <div class="chat-header">
+            <h1>🎓 High School Tutor</h1>
+            <p>Your AI learning assistant for Math, Science, Literature, and History</p>
+        </div>
+        
+        <!-- Messages Area -->
+        <div class="messages-container" id="messagesContainer">
+            <!-- Welcome Message -->
+            <div class="welcome-message">
+                <h2>Welcome to Your AI Tutor!</h2>
+                <p>I'm here to help you with your high school coursework. I can assist with:</p>
+                <ul>
+                    <li><strong>Mathematics:</strong> Algebra, Geometry, Trigonometry, Calculus</li>
+                    <li><strong>Science:</strong> Physics, Chemistry, Biology</li>
+                    <li><strong>Literature:</strong> Analysis, themes, writing techniques</li>
+                    <li><strong>History:</strong> Events, causes, historical context</li>
+                </ul>
+                <p style="margin-top: 12px;">Ask me anything, and I'll do my best to explain it clearly!</p>
+            </div>
+            
+            <!-- Loading Indicator -->
+            <div class="loading-indicator" id="loadingIndicator">
+                <div class="loading-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <span>Thinking...</span>
+            </div>
+            
+            <!-- Error Message -->
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+        
+        <!-- Input Area -->
+        <div class="input-container">
+            <div class="input-wrapper">
+                <textarea 
+                    id="messageInput" 
+                    placeholder="Ask a question... (e.g., 'Explain Newton's second law')"
+                    rows="1"
+                ></textarea>
+            </div>
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        /* ============================================================================
+           JAVASCRIPT FUNCTIONALITY
+           ============================================================================ */
+        
+        // Message storage
+        let messages = [];
+        
+        // DOM elements
+        const messagesContainer = document.getElementById('messagesContainer');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const errorMessage = document.getElementById('errorMessage');
+        
+        // ============================================================================
+        // MESSAGE RENDERING
+        // ============================================================================
+        
+        /**
+         * Add a message to the messages array and render it
+         */
+        function addMessage(role, content) {
+            const message = {
+                id: Date.now().toString(),
+                role: role, // 'user' or 'assistant'
+                content: content,
+                timestamp: new Date()
+            };
+            
+            messages.push(message);
+            renderMessage(message);
+            scrollToBottom();
+        }
+        
+        /**
+         * Render a single message in the chat
+         */
+        function renderMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${message.role}`;
+            messageDiv.setAttribute('data-id', message.id);
+            
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.className = 'message-bubble';
+            bubbleDiv.textContent = message.content;
+            
+            messageDiv.appendChild(bubbleDiv);
+            
+            // Insert before loading indicator
+            messagesContainer.insertBefore(messageDiv, loadingIndicator);
+        }
+        
+        /**
+         * Scroll to the bottom of the messages container
+         */
+        function scrollToBottom() {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        // ============================================================================
+        // INPUT HANDLING AND VALIDATION
+        // ============================================================================
+        
+        /**
+         * Validate user input
+         */
+        function validateInput(text) {
+            if (!text || !text.trim()) {
+                return { valid: false, error: 'Please enter a message' };
+            }
+            if (text.length > 2000) {
+                return { valid: false, error: 'Message is too long (max 2000 characters)' };
+            }
+            return { valid: true };
+        }
+        
+        /**
+         * Show error message
+         */
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('active');
+            setTimeout(() => {
+                errorMessage.classList.remove('active');
+            }, 5000);
+        }
+        
+        /**
+         * Clear error message
+         */
+        function clearError() {
+            errorMessage.classList.remove('active');
+        }
+        
+        /**
+         * Set loading state
+         */
+        function setLoading(isLoading) {
+            if (isLoading) {
+                loadingIndicator.classList.add('active');
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+                scrollToBottom();
+            } else {
+                loadingIndicator.classList.remove('active');
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                messageInput.focus();
+            }
+        }
+        
+        // ============================================================================
+        // API COMMUNICATION
+        // ============================================================================
+        
+        /**
+         * Send message to the backend API
+         */
+        async function sendMessage() {
+            const text = messageInput.value;
+            
+            // Validate input
+            const validation = validateInput(text);
+            if (!validation.valid) {
+                showError(validation.error);
+                return;
+            }
+            
+            clearError();
+            
+            // Add user message to chat
+            addMessage('user', text.trim());
+            
+            // Clear input
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            
+            // Set loading state
+            setLoading(true);
+            
+            try {
+                // Send request to backend
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: text.trim()
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to get response');
+                }
+                
+                const data = await response.json();
+                
+                // Add assistant response to chat
+                addMessage('assistant', data.response);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                showError(error.message || 'Unable to connect to server. Please check your connection.');
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        // ============================================================================
+        // EVENT LISTENERS
+        // ============================================================================
+        
+        /**
+         * Handle send button click
+         */
+        sendButton.addEventListener('click', () => {
+            sendMessage();
+        });
+        
+        /**
+         * Handle Enter key press (without Shift)
+         */
+        messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        
+        /**
+         * Auto-resize textarea as user types
+         */
+        messageInput.addEventListener('input', () => {
+            messageInput.style.height = 'auto';
+            messageInput.style.height = messageInput.scrollHeight + 'px';
+        });
+        
+        /**
+         * Focus input on page load
+         */
+        window.addEventListener('load', () => {
+            messageInput.focus();
+        });
+    </script>
+</body>
+</html>
