@@ -6,6 +6,7 @@ Provides REST API endpoints for the web-based tutor chatbot interface.
 
 import os
 import logging
+import time
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -45,6 +46,7 @@ model_service: Optional[ModelService] = None
 class ChatRequest(BaseModel):
     """Request model for chat endpoint"""
     message: str
+    session_id: Optional[str] = None  # For tracking conversation sessions
     
     @field_validator('message')
     @classmethod
@@ -61,6 +63,7 @@ class ChatResponse(BaseModel):
     """Response model for successful chat responses"""
     response: str
     status: str = "success"
+    session_id: Optional[str] = None  # Return session ID for frontend tracking
 
 
 class ErrorResponse(BaseModel):
@@ -169,7 +172,10 @@ async def chat(request: ChatRequest):
         
         logger.info(f"Processing message: {request.message[:50]}...")
         
-        # Generate response using model service
+        # Generate session ID if not provided
+        session_id = request.session_id or f"session_{hash(request.message + str(time.time()))}"
+        
+        # Generate response using model service (context is maintained in the service)
         response_text = model_service.get_response(
             user_message=request.message,
             max_tokens=500
@@ -179,7 +185,8 @@ async def chat(request: ChatRequest):
         
         return ChatResponse(
             response=response_text,
-            status="success"
+            status="success",
+            session_id=session_id
         )
         
     except HTTPException:
@@ -192,6 +199,25 @@ async def chat(request: ChatRequest):
             status_code=500,
             detail="An error occurred while processing your message. Please try again."
         )
+
+
+@app.post("/clear")
+async def clear_conversation():
+    """
+    Clear conversation history and context.
+    
+    Returns:
+        Success message
+    """
+    try:
+        if model_service and hasattr(model_service, 'actual_tutor') and model_service.actual_tutor:
+            model_service.actual_tutor.clear_conversation()
+        
+        return {"status": "success", "message": "Conversation cleared"}
+        
+    except Exception as e:
+        logger.error(f"Error clearing conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to clear conversation")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -268,9 +294,9 @@ if __name__ == "__main__":
     import uvicorn
     
     # Get configuration from environment variables
-    # Default to 7860 for Hugging Face Spaces compatibility
+    # Default to 8000 for local development
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "7860"))
+    port = int(os.getenv("PORT", "8000"))
     
     logger.info(f"Starting server on {host}:{port}")
     

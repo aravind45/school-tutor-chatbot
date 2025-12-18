@@ -40,11 +40,11 @@ from trl import SFTTrainer
 # Config
 # -----------------------------
 MODEL_NAME = "unsloth/llama-3-8b-bnb-4bit"  # change as needed
-OUTPUT_DIR = "tutor_model_lora"
+OUTPUT_DIR = "tutor_model_ap_windows"
 MAX_SEQ_LENGTH = 2048
 
-TRAIN_PATH = "data/train.jsonl"
-EVAL_PATH  = "data/eval.jsonl"
+TRAIN_PATH = "data_ap_combined/train.jsonl"
+EVAL_PATH  = "data_ap_combined/eval.jsonl"
 
 
 # -----------------------------
@@ -143,8 +143,8 @@ def train_tutor_model():
         raise ValueError(f"Eval dataset missing columns: {missing_eval}")
 
     print("🧾 Formatting prompts into `text` field...")
-    train_dataset = train_dataset.map(formatting_prompts_func, batched=True)
-    eval_dataset  = eval_dataset.map(formatting_prompts_func, batched=True)
+    train_dataset = train_dataset.map(formatting_prompts_func, batched=True, num_proc=1)
+    eval_dataset  = eval_dataset.map(formatting_prompts_func, batched=True, num_proc=1)
 
     # Sanity print
     print("\n--- Sample formatted training text (first 400 chars) ---")
@@ -157,7 +157,7 @@ def train_tutor_model():
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
         warmup_steps=100,
-        max_steps=1000,              # adjust as needed
+        max_steps=200,               # Reduced for AP dataset size
         learning_rate=2e-4,          # if unstable, try 1e-4
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=torch.cuda.is_bf16_supported(),

@@ -141,6 +141,29 @@
             border-bottom-left-radius: 4px;
         }
         
+        /* Enhanced formatting for tutor responses */
+        .message-bubble .section-header {
+            font-size: 1.1em;
+            color: #667eea;
+            margin: 12px 0 8px 0;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .message-bubble strong {
+            color: #333;
+            font-weight: 600;
+        }
+        
+        .message-bubble em {
+            color: #555;
+            font-style: italic;
+        }
+        
+        .message-bubble br + br {
+            line-height: 0.5;
+        }
+        
         .loading-indicator {
             display: none;
             align-items: center;
@@ -351,6 +374,7 @@
                     rows="1"
                 ></textarea>
             </div>
+            <button id="clearButton" title="Clear conversation">🗑️</button>
             <button id="sendButton">Send</button>
         </div>
     </div>
@@ -360,13 +384,15 @@
            JAVASCRIPT FUNCTIONALITY
            ============================================================================ */
         
-        // Message storage
+        // Message storage and session tracking
         let messages = [];
+        let sessionId = null;
         
         // DOM elements
         const messagesContainer = document.getElementById('messagesContainer');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
+        const clearButton = document.getElementById('clearButton');
         const loadingIndicator = document.getElementById('loadingIndicator');
         const errorMessage = document.getElementById('errorMessage');
         
@@ -400,7 +426,25 @@
             
             const bubbleDiv = document.createElement('div');
             bubbleDiv.className = 'message-bubble';
-            bubbleDiv.textContent = message.content;
+            
+            // Convert basic markdown formatting to HTML for better readability
+            let formattedContent = message.content
+                // Convert **bold** to <strong>
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                // Convert *italic* to <em>
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                // Convert line breaks to <br>
+                .replace(/\n/g, '<br>')
+                // Convert bullet points (- item) to proper list items
+                .replace(/^- (.*$)/gm, '• $1')
+                // Convert numbered lists (1. item) to proper format
+                .replace(/^\d+\. (.*$)/gm, '<strong>$&</strong>')
+                // Convert section headers (##) to proper formatting
+                .replace(/^\*\*(.*?)\*\*$/gm, '<div class="section-header"><strong>$1</strong></div>')
+                // Add spacing after colons for better readability
+                .replace(/: /g, ':<br>&nbsp;&nbsp;');
+            
+            bubbleDiv.innerHTML = formattedContent;
             
             messageDiv.appendChild(bubbleDiv);
             
@@ -497,15 +541,22 @@
             setLoading(true);
             
             try {
-                // Send request to backend
+                // Send request to backend with session tracking
+                const requestBody = {
+                    message: text.trim()
+                };
+                
+                // Include session ID if we have one
+                if (sessionId) {
+                    requestBody.session_id = sessionId;
+                }
+                
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        message: text.trim()
-                    })
+                    body: JSON.stringify(requestBody)
                 });
                 
                 if (!response.ok) {
@@ -514,6 +565,11 @@
                 }
                 
                 const data = await response.json();
+                
+                // Store session ID for conversation continuity
+                if (data.session_id) {
+                    sessionId = data.session_id;
+                }
                 
                 // Add assistant response to chat
                 addMessage('assistant', data.response);
@@ -536,6 +592,28 @@
         sendButton.addEventListener('click', () => {
             sendMessage();
         });
+        
+        /**
+         * Handle clear conversation button click
+         */
+        clearButton.addEventListener('click', () => {
+            clearConversation();
+        });
+        
+        /**
+         * Clear conversation history
+         */
+        function clearConversation() {
+            messages = [];
+            sessionId = null;
+            messagesContainer.innerHTML = '';
+            
+            // Add welcome message back
+            addMessage('assistant', 'Hi! I\'m your physics and chemistry tutor. I can help you with:\n\n• **Physics:** Kinematics, forces, energy, projectile motion, Newton\'s laws\n• **Chemistry:** Atomic structure, bonding, acids/bases, solutions\n• **Problem solving:** Step-by-step explanations and examples\n• **Creative explanations:** Analogies, stories, and memory aids\n\nAsk me anything, and I\'ll do my best to explain it clearly!');
+            
+            // Clear any error messages
+            clearError();
+        }
         
         /**
          * Handle Enter key press (without Shift)
